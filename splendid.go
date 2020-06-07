@@ -138,6 +138,14 @@ func main() {
 	var err error
 	var credentials []string
 
+	logFile, err := os.OpenFile("/var/log/splendid/splendid.log", os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0640)
+	if err != nil {
+		log.Println(err)
+	} else {
+		defer logFile.Close()
+		log.SetOutput(logFile)
+	}
+
 	credentials, err = readAllLines("/etc/splendid/credentials")
 	if err != nil {
 		log.Fatal(err)
