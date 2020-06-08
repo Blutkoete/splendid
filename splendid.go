@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"github.com/bpicode/fritzctl/fritz"
 	"io/ioutil"
 	"log"
@@ -12,15 +13,15 @@ import (
 
 var username string
 var password string
-var authorizedKeys[]string
+var authorizedKeys []string
 var fritzbox fritz.HomeAuto
 
 type homeAutomationRequest struct {
-	Key string
+	Key    string
 	Device string
-	Name string
+	Name   string
 	Action string
-	Value string
+	Value  string
 }
 
 func readAllLines(filePath string) ([]string, error) {
@@ -43,35 +44,44 @@ func readAllLines(filePath string) ([]string, error) {
 	return lines, nil
 }
 
+func logTextAndError(text string, err error) {
+	if text != "" {
+		log.Println(text)
+	}
+	if err != nil {
+		log.Println(err)
+	}
+}
+
+func respondWithStatusCode(writer http.ResponseWriter, statusCode int, additionalText string) {
+	writer.WriteHeader(statusCode)
+	if additionalText != "" {
+		log.Println(additionalText)
+		writer.Write([]byte(additionalText))
+	}
+}
+
 func requestDispatcher(writer http.ResponseWriter, request *http.Request) {
 	log.Printf("Received %s request from %s.\n", request.Method, request.RemoteAddr)
 
 	if request.Method != "POST" {
-		log.Println(request.Body)
-		log.Println("405 - Method not allowed")
-		writer.WriteHeader(http.StatusMethodNotAllowed)
-		writer.Write([]byte("405 - Method not allowed"))
+		logTextAndError("", nil)
+		respondWithStatusCode(writer, http.StatusMethodNotAllowed, "405 - Method not allowed")
 		return
 	}
 
 	body, err := ioutil.ReadAll(request.Body)
 	if err != nil {
-		log.Println(request.Body)
-		log.Println(err)
-		log.Println("400 - Invalid body")
-		writer.WriteHeader(http.StatusBadRequest)
-		writer.Write([]byte("400 - Invalid body"))
+		logTextAndError("", err)
+		respondWithStatusCode(writer, http.StatusBadRequest, "400 - Bad request")
 		return
 	}
 
 	var parsedRequest homeAutomationRequest
 	err = json.Unmarshal(body, &parsedRequest)
 	if err != nil {
-		log.Println(string(body))
-		log.Println(err)
-		log.Println("400 - Invalid body")
-		writer.WriteHeader(http.StatusBadRequest)
-		writer.Write([]byte("400 - Invalid body"))
+		logTextAndError(string(body), err)
+		respondWithStatusCode(writer, http.StatusBadRequest, "400 - Bad request")
 		return
 	}
 
@@ -84,12 +94,13 @@ func requestDispatcher(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	if !keyValid {
-		log.Println(parsedRequest.Key)
-		log.Println("403 - Permission denied")
-		writer.WriteHeader(http.StatusForbidden)
-		writer.Write([]byte("403 - Permission denied"))
+		logTextAndError(string(body), nil)
+		respondWithStatusCode(writer, http.StatusForbidden, "403 - Forbidden")
 		return
 	}
+
+	logTextAndError(fmt.Sprintf("{ \"key\": <VALID>, \"device\": \"%s\", \"name\": \"%s\",  \"action\": \"%s\", \"value\": \"%s\" }",
+		parsedRequest.Device, parsedRequest.Name, parsedRequest.Action, parsedRequest.Value), nil)
 
 	fritzbox = fritz.NewHomeAuto(
 		fritz.SkipTLSVerify(),
@@ -97,7 +108,9 @@ func requestDispatcher(writer http.ResponseWriter, request *http.Request) {
 	)
 	err = fritzbox.Login()
 	if err != nil {
-		log.Fatal(err)
+		logTextAndError("", nil)
+		respondWithStatusCode(writer, http.StatusInternalServerError, "500 - Internal server error")
+		return
 	}
 
 	if parsedRequest.Device == "switch" {
@@ -107,44 +120,37 @@ func requestDispatcher(writer http.ResponseWriter, request *http.Request) {
 			} else if parsedRequest.Value == "1" {
 				err = fritzbox.On(parsedRequest.Name)
 			} else {
-				log.Printf("{ \"key\": <VALID>, \"device\": \"%s\", \"name\": \"%s\", \"action\": \"%s\", \"value\": \"%s\" }",
-					       parsedRequest.Device, parsedRequest.Name, parsedRequest.Action, parsedRequest.Value)
-				log.Println("400 - Invalid body")
-				writer.WriteHeader(http.StatusBadRequest)
-				writer.Write([]byte("400 - Invalid body"))
+				respondWithStatusCode(writer, http.StatusNotAcceptable, "406 - Not acceptable")
 				return
 			}
 		}
-	}
-
-	if err != nil {
-		log.Printf("{ \"key\": <VALID>, \"device\": \"%s\", \"name\": \"%s\", \"action\": \"%s\", \"value\": \"%s\" }",
-			parsedRequest.Device, parsedRequest.Name, parsedRequest.Action, parsedRequest.Value)
-		log.Println(err)
-		log.Println("406 - Request not acceptable")
-		writer.WriteHeader(http.StatusNotAcceptable)
-		writer.Write([]byte("406 - Request not acceptable"))
+	} else {
+		respondWithStatusCode(writer, http.StatusNotAcceptable, "406 - Not acceptable")
 		return
 	}
 
-	log.Printf("{ \"key\": <VALID>, \"device\": \"%s\", \"name\": \"%s\", \"action\": \"%s\", \"value\": \"%s\" }",
-		parsedRequest.Device, parsedRequest.Name, parsedRequest.Action, parsedRequest.Value)
-	log.Println("200 - Ok")
-	writer.WriteHeader(http.StatusOK)
-	writer.Write([]byte("200 - Ok"))
+	if err != nil {
+		logTextAndError("", err)
+		respondWithStatusCode(writer, http.StatusNotAcceptable, "406 - Not acceptable")
+		return
+	}
+
+	respondWithStatusCode(writer, http.StatusOK, "200 - Ok")
 }
 
 func main() {
 	var err error
 	var credentials []string
 
-	logFile, err := os.OpenFile("/var/log/splendid/splendid.log", os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0640)
+	logFile, err := os.OpenFile("/var/log/splendid/splendid.log", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
 	if err != nil {
 		log.Println(err)
 	} else {
 		defer logFile.Close()
 		log.SetOutput(logFile)
 	}
+
+	log.Println("Starting up ...")
 
 	credentials, err = readAllLines("/etc/splendid/credentials")
 	if err != nil {
@@ -185,4 +191,3 @@ func main() {
 		log.Fatal(err)
 	}
 }
-
