@@ -140,9 +140,13 @@ func requestDispatcher(writer http.ResponseWriter, request *http.Request) {
 
 func main() {
 	var err error
+	var config []string
+	var listenAddressAndPort string
+	var certPath string
+	var keyPath string
 	var credentials []string
 
-	logFile, err := os.OpenFile("/var/log/splendid/splendid.log", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
+	logFile, err := os.OpenFile("/var/log/splendid/splendid.log", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
 		log.Println(err)
 	} else {
@@ -151,6 +155,23 @@ func main() {
 	}
 
 	log.Println("Starting up ...")
+
+	config, err = readAllLines("/etc/splendid/config")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if len(config) == 1 {
+		listenAddressAndPort = config[0]
+		certPath = "/etc/splendid/cert.pem"
+		keyPath = "/etc/splendid/key.pem"
+	} else if len(config) == 3 {
+		listenAddressAndPort = config[0]
+		certPath = config[1]
+		keyPath = config[2]
+	} else {
+		log.Fatalf("Invalid line count in config file: %d", len(credentials))
+	}
 
 	credentials, err = readAllLines("/etc/splendid/credentials")
 	if err != nil {
@@ -186,7 +207,7 @@ func main() {
 	}
 
 	http.HandleFunc("/gghr/", requestDispatcher)
-	err = http.ListenAndServeTLS("10.13.5.20:7778", "/etc/splendid/cert.pem", "/etc/splendid/key.pem", nil)
+	err = http.ListenAndServeTLS(listenAddressAndPort, certPath, keyPath, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
