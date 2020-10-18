@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 var username string
@@ -123,6 +124,15 @@ func requestDispatcher(writer http.ResponseWriter, request *http.Request) {
 				respondWithStatusCode(writer, http.StatusNotAcceptable, "406 - Not acceptable")
 				return
 			}
+		}
+	} else if parsedRequest.Device == "thermostat" {
+		if parsedRequest.Action == "set" {
+			var temperature float64
+			temperature, err = strconv.ParseFloat(parsedRequest.Value, 64)
+			if err != nil {
+				respondWithStatusCode(writer, http.StatusNotAcceptable, "406 - Not acceptable")
+			}
+			err = fritzbox.Temp(temperature, parsedRequest.Name)
 		}
 	} else {
 		respondWithStatusCode(writer, http.StatusNotAcceptable, "406 - Not acceptable")
